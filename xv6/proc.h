@@ -8,6 +8,7 @@ struct cpu {
   int ncli;                    // Depth of pushcli nesting.
   int intena;                  // Were interrupts enabled before pushcli?
   struct proc *proc;           // The process running on this cpu or null
+  int sched_policy; 
 };
 
 extern struct cpu cpus[NCPU];
@@ -49,10 +50,15 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int priority;               // 현재 우선순위 (0~3)
+  int ticks[4];               // 각 우선순위에서 사용한 타임 슬라이스
+  int wait_ticks[4];          // 각 우선순위에서 대기한 시간
 };
-
 // Process memory is laid out contiguously, low addresses first:
 //   text
 //   original data and bss
 //   fixed-size stack
 //   expandable heap
+
+int getpinfo(struct pstat *ps);
+int setSchedPolicy(int policy);

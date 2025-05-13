@@ -113,4 +113,12 @@ trap(struct trapframe *tf)
   // Check if the process has been killed since we yielded
   if(myproc() && myproc()->killed && (tf->cs&3) == DPL_USER)
     exit();
+
+  if(myproc() && myproc()->state == RUNNING && tf->trapno == T_IRQ0 + IRQ_TIMER) {
+  myproc()->ticks[myproc()->priority]++;
+  for(int q = 0; q < 4; q++) {
+    if(q != myproc()->priority)
+      myproc()->wait_ticks[q]++;
+  }
+  yield();
 }
