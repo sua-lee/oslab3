@@ -23,6 +23,8 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
+int setSchedPolicy(int policy);
+int getpinfo(struct pstat *ps);
 
 // ulib.c
 int stat(char*, struct stat*);

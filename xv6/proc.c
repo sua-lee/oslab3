@@ -1,3 +1,9 @@
+#define TICKS_Q3 8
+#define TICKS_Q2 16
+#define TICKS_Q1 32
+#define BOOST_TICKS 500
+#define CHEAT_MULTIPLIER 10
+
 #include "types.h"
 #include "defs.h"
 #include "param.h"
@@ -7,6 +13,7 @@
 #include "proc.h"
 #include "spinlock.h"
 #include "debug.h"
+#include "pstat.h"
 
 struct {
   struct spinlock lock;
@@ -20,6 +27,36 @@ extern void forkret(void);
 extern void trapret(void);
 
 static void wakeup1(void *chan);
+
+int
+getpinfo(struct pstat *ps)
+{
+  acquire(&ptable.lock);
+  for (int i = 0; i < NPROC; i++) {
+    struct proc *p = &ptable.proc[i];
+    ps->inuse[i] = (p->state != UNUSED);
+    ps->pid[i] = p->pid;
+    ps->priority[i] = p->priority;
+    ps->state[i] = p->state;
+    for (int q = 0; q < 4; q++) {
+      ps->ticks[i][q] = p->ticks[q];
+      ps->wait_ticks[i][q] = p->wait_ticks[q];
+    }
+  }
+  release(&ptable.lock);
+  return 0;
+}
+
+int
+setSchedPolicy(int policy)
+{
+  if (policy < 0 || policy > 3)
+    return -1;
+  acquire(&ptable.lock);
+  mycpu()->sched_policy = policy;
+  release(&ptable.lock);
+  return 0;
+}
 
 void
 pinit(void)
@@ -81,6 +118,7 @@ allocproc(void)
 
   acquire(&ptable.lock);
 
+  // 프로세스 테이블에서 UNUSED 상태의 프로세스 찾기
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == UNUSED){
       goto found;
@@ -90,28 +128,34 @@ allocproc(void)
   return 0;
 
 found:
-  p->state = EMBRYO;
-  p->pid = nextpid++;
+  p->state = EMBRYO;       // 프로세스 상태를 EMBRYO로 설정
+  p->pid = nextpid++;      // 프로세스 ID 할당
+
+  // MLFQ 스케줄링을 위한 초기화 코드
+  p->priority = 3;  // 새로 생성된 프로세스는 Q3에서 시작
+  for(int i = 0; i < 4; i++) {
+    p->ticks[i] = 0;       // 각 우선순위 큐의 사용 시간 초기화
+    p->wait_ticks[i] = 0;  // 각 우선순위 큐의 대기 시간 초기화
+  }
 
   release(&ptable.lock);
 
-
-  // Allocate kernel stack.
+  // 커널 스택 할당
   if((p->kstack = kalloc()) == 0){
     p->state = UNUSED;
     return 0;
   }
   sp = p->kstack + KSTACKSIZE;
 
-  // Leave room for trap frame.
+  // 트랩 프레임을 위한 공간 할당
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
 
-  // Set up new context to start executing at forkret,
-  // which returns to trapret.
+  // forkret으로 실행하기 위한 설정
   sp -= 4;
   *(uint*)sp = (uint)trapret;
 
+  // 컨텍스트 설정
   sp -= sizeof *p->context;
   p->context = (struct context*)sp;
   memset(p->context, 0, sizeof *p->context);
@@ -119,6 +163,7 @@ found:
 
   return p;
 }
+
 
 //PAGEBREAK: 32
 // Set up first user process.
@@ -338,23 +383,36 @@ scheduler(void)
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+    
+    for(int q = 3; q >= 0; q--) {
+      for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+        if(p->state != RUNNABLE || p->priority != q)
+          continue;
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
+        c->proc = p;
+        switchuvm(p);
+        p->state = RUNNING;
+        p->ticks[q]++;  // 현재 우선순위에서의 수행 시간 증가
 
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
+        swtch(&(c->scheduler), p->context);
+        switchkvm();
 
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
+        // Demotion
+        if(p->ticks[q] >= (1 << (3 - q)) * 8) {
+          if(p->priority > 0)
+            p->priority--;
+          p->ticks[q] = 0;
+        }
+
+        // Priority Boost
+        if(p->wait_ticks[q] >= (q == 0 ? BOOST_TICKS : TICKS_Q3 * CHEAT_MULTIPLIER)) {
+          if(p->priority < 3)
+            p->priority++;
+          p->wait_ticks[q] = 0;
+        }
+
+        c->proc = 0;
+      }
     }
     release(&ptable.lock);
 
