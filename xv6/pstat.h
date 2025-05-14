@@ -1,18 +1,17 @@
+#ifndef _PSTAT_H_
+#define _PSTAT_H_
+
 #include "param.h"
 
+#define NQUEUE 4  // MLFQ의 우선순위 큐 개수
+
 struct pstat {
-  // whether this slot of the process table is in use (1 or 0)
-  int inuse[NPROC]; 
-  // PID of each process
-  int pid[NPROC];   
-  // current priority level of each process (0-3)
-  int priority[NPROC];  
-  // current state (e.g., SLEEPING or RUNNABLE) of each process
-  // see enum procstate
-  int state[NPROC];  
-  // number of ticks each process has accumulated 
-  // RUNNING/SCHEDULED at each of 4 priorities
-  int ticks[NPROC][4];  
-  // number of ticks each process has waited before being scheduled
-  int wait_ticks[NPROC][4]; 
+    int inuse[NPROC];       // 사용 여부
+    int pid[NPROC];         // 프로세스 ID
+    int priority[NPROC];    // 우선순위 (0-3)
+    int state[NPROC];       // 프로세스 상태 (RUNNING 등)
+    int ticks[NPROC][NQUEUE];      // 각 우선순위 큐에서 사용한 틱 수
+    int wait_ticks[NPROC][NQUEUE]; // 각 큐에서 대기한 시간
 };
+
+#endif  // _PSTAT_H_

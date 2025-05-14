@@ -1,9 +1,3 @@
-#define TICKS_Q3 8
-#define TICKS_Q2 16
-#define TICKS_Q1 32
-#define BOOST_TICKS 500
-#define CHEAT_MULTIPLIER 10
-
 #include "types.h"
 #include "defs.h"
 #include "param.h"
@@ -14,6 +8,29 @@
 #include "spinlock.h"
 #include "debug.h"
 #include "pstat.h"
+
+#define NQUEUE 4  
+
+#define TICKS_Q3 8
+#define TICKS_Q2 16
+#define TICKS_Q1 32
+#define BOOST_TICKS 500
+#define CHEAT_MULTIPLIER 10
+
+// 전역 변수로 MLFQ 상태를 관리
+struct pstat mlfq;
+
+// MLFQ 초기화 함수
+void init_mlfq(void) {
+    for (int i = 0; i < NPROC; i++) {
+        mlfq.inuse[i] = 0;
+        mlfq.priority[i] = 3;  // 모든 프로세스는 Q3(최고 우선순위)에서 시작
+        for (int j = 0; j < NQUEUE; j++) {
+            mlfq.ticks[i][j] = 0;
+            mlfq.wait_ticks[i][j] = 0;
+        }
+    }
+}
 
 struct {
   struct spinlock lock;
@@ -228,48 +245,31 @@ growproc(int n)
 // Create a new process copying p as the parent.
 // Sets up stack to return as if from system call.
 // Caller must set state of returned proc to RUNNABLE.
-int
-fork(void)
-{
-  int i, pid;
-  struct proc *np;
-  struct proc *curproc = myproc();
+int fork(void) {
+    struct proc *np;
+    struct proc *curproc = myproc();
+    acquire(&ptable.lock);
 
-  // Allocate process.
-  if((np = allocproc()) == 0){
-    return -1;
-  }
+    // 새로운 프로세스 슬롯 할당
+    if ((np = allocproc()) == 0) {
+        release(&ptable.lock);
+        return -1;
+    }
 
-  // Copy process state from proc.
-  if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
-    kfree(np->kstack);
-    np->kstack = 0;
-    np->state = UNUSED;
-    return -1;
-  }
-  np->sz = curproc->sz;
-  np->parent = curproc;
-  *np->tf = *curproc->tf;
+    // 부모 프로세스 정보 복사
+    np->parent = curproc;
+    np->pid = nextpid++;
 
-  // Clear %eax so that fork returns 0 in the child.
-  np->tf->eax = 0;
+    // MLFQ 정보 초기화
+    int index = np - ptable.proc;
+    mlfq.inuse[index] = 1;
+    mlfq.pid[index] = np->pid;
+    mlfq.priority[index] = 3;  // 기본 우선순위는 Q3
+    mlfq.ticks[index][3] = 0;
+    mlfq.wait_ticks[index][3] = 0;
 
-  for(i = 0; i < NOFILE; i++)
-    if(curproc->ofile[i])
-      np->ofile[i] = filedup(curproc->ofile[i]);
-  np->cwd = idup(curproc->cwd);
-
-  safestrcpy(np->name, curproc->name, sizeof(curproc->name));
-
-  pid = np->pid;
-
-  acquire(&ptable.lock);
-
-  np->state = RUNNABLE;
-
-  release(&ptable.lock);
-
-  return pid;
+    release(&ptable.lock);
+    return np->pid;
 }
 
 // Exit the current process.  Does not return.
